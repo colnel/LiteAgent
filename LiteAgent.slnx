@@ -1,1 +1,4 @@
-<Solution />
+<Solution>
+  <Project Path="src/AgentHost/AgentHost.csproj" Id="9d33363d-d388-4f28-9f7e-f49c0817f4cf" />
+  <Project Path="src/FunctionTools/FunctionTools.csproj" Id="a3ed07c9-0ca6-4407-8c9f-50dfb9c618cc" />
+</Solution>
