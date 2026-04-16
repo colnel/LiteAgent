@@ -1,50 +1,46 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using LiteAgent.AgentHost.Models;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Options;
+using System;
+using System.Collections.Generic;
+using System.Data;
 
 namespace LiteAgent.AgentHost.Services;
 
 /// <summary>
-/// SQLite 数据服务类，提供 User 表的增删改查操作
+/// SQLite 数据服务类，提供 AgentSkill 表的增删改查操作
 /// </summary>
-public class DataService
+public class DataService(IOptions<string> _connString, ILogger<Worker> _logger) : IDisposable
 {
-    private readonly string _connectionString;
+    private readonly SqliteConnection _dbConnection = new(new SqliteConnectionStringBuilder
+    {
+        DataSource = _connString.Value,
+        Mode = SqliteOpenMode.ReadWriteCreate, // 不存在则创建
+        Cache = SqliteCacheMode.Shared,
+        DefaultTimeout = 5000, // 设置默认超时时间为5秒
+        Password = "colnel*LiteAgent@2026" // 可选：设置数据库密码
+    }.ToString());
 
     /// <summary>
-    /// 构造函数
+    /// 初始化数据库连接和表结构
     /// </summary>
-    /// <param name="databaseFile">数据库文件路径（如 "data.db"）</param>
-    public DataService(string databaseFile)
+    internal async Task Initialize()
     {
-        // 构建连接字符串，启用自动关闭和共享缓存
-        _connectionString = new SqliteConnectionStringBuilder
+        try
         {
-            DataSource = databaseFile,
-            Mode = SqliteOpenMode.ReadWriteCreate, // 不存在则创建
-            Cache = SqliteCacheMode.Shared
-        }.ToString();
-
-        // 初始化数据库：创建表（如果不存在）
-        InitializeDatabase();
-    }
-
-    /// <summary>
-    /// 初始化数据库，创建 User 表
-    /// </summary>
-    private void InitializeDatabase()
-    {
-        const string createTableSql = @"
-                CREATE TABLE IF NOT EXISTS User (
+            await OpenAsync();
+            await ExecuteNonQueryAsync(@"
+                CREATE TABLE IF NOT EXISTS Skill (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     Name TEXT NOT NULL,
                     Age INTEGER NOT NULL
-                )";
+                )");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "DataService 初始化失败:{ex}", ex);
+        }
 
-        using var connection = new SqliteConnection(_connectionString);
-        connection.Open();
-        using var command = new SqliteCommand(createTableSql, connection);
-        command.ExecuteNonQuery();
     }
 
     /// <summary>
@@ -56,7 +52,7 @@ public class DataService
     public int InsertUser(string name, int age)
     {
         const string insertSql = @"
-                INSERT INTO User (Name, Age)
+                INSERT INTO AgentSkill (Name, Age)
                 VALUES (@name, @age);
                 SELECT last_insert_rowid();";
 
@@ -77,7 +73,7 @@ public class DataService
     public int UpdateUser(int id, string newName, int newAge)
     {
         const string updateSql = @"
-                UPDATE User
+                UPDATE AgentSkill
                 SET Name = @name, Age = @age
                 WHERE Id = @id";
 
@@ -97,7 +93,7 @@ public class DataService
     /// <returns>受影响的行数</returns>
     public int DeleteUser(int id)
     {
-        const string deleteSql = "DELETE FROM User WHERE Id = @id";
+        const string deleteSql = "DELETE FROM AgentSkill WHERE Id = @id";
 
         using var connection = new SqliteConnection(_connectionString);
         connection.Open();
@@ -110,10 +106,10 @@ public class DataService
     /// <summary>
     /// 根据 Id 查询单个用户
     /// </summary>
-    /// <returns>User 对象，未找到返回 null</returns>
-    public User GetUserById(int id)
+    /// <returns>AgentSkill 对象，未找到返回 null</returns>
+    public AgentSkill GetUserById(int id)
     {
-        const string querySql = "SELECT Id, Name, Age FROM User WHERE Id = @id";
+        const string querySql = "SELECT Id, Name, Age FROM AgentSkill WHERE Id = @id";
 
         using var connection = new SqliteConnection(_connectionString);
         connection.Open();
@@ -123,7 +119,7 @@ public class DataService
         using var reader = command.ExecuteReader();
         if (reader.Read())
         {
-            return new User
+            return new AgentSkill
             {
                 Id = reader.GetInt32(0),
                 Name = reader.GetString(1),
@@ -136,11 +132,11 @@ public class DataService
     /// <summary>
     /// 获取所有用户列表
     /// </summary>
-    public List<User> GetAllUsers()
+    public List<AgentSkill> GetAllUsers()
     {
-        const string querySql = "SELECT Id, Name, Age FROM User ORDER BY Id";
+        const string querySql = "SELECT Id, Name, Age FROM AgentSkill ORDER BY Id";
 
-        var users = new List<User>();
+        var users = new List<AgentSkill>();
         using var connection = new SqliteConnection(_connectionString);
         connection.Open();
         using var command = new SqliteCommand(querySql, connection);
@@ -148,7 +144,7 @@ public class DataService
 
         while (reader.Read())
         {
-            users.Add(new User
+            users.Add(new AgentSkill
             {
                 Id = reader.GetInt32(0),
                 Name = reader.GetString(1),
@@ -161,10 +157,10 @@ public class DataService
     /// <summary>
     /// 按姓名模糊查询用户
     /// </summary>
-    public List<User> SearchUsersByName(string keyword)
+    public List<AgentSkill> SearchUsersByName(string keyword)
     {
-        const string searchSql = "SELECT Id, Name, Age FROM User WHERE Name LIKE @keyword ORDER BY Id";
-        var users = new List<User>();
+        const string searchSql = "SELECT Id, Name, Age FROM AgentSkill WHERE Name LIKE @keyword ORDER BY Id";
+        var users = new List<AgentSkill>();
 
         using var connection = new SqliteConnection(_connectionString);
         connection.Open();
@@ -174,7 +170,7 @@ public class DataService
         using var reader = command.ExecuteReader();
         while (reader.Read())
         {
-            users.Add(new User
+            users.Add(new AgentSkill
             {
                 Id = reader.GetInt32(0),
                 Name = reader.GetString(1),
@@ -183,19 +179,71 @@ public class DataService
         }
         return users;
     }
-}
-
-/// <summary>
-/// 用户实体类
-/// </summary>
-public class User
-{
-    public int Id { get; set; }
-    public string Name { get; set; }
-    public int Age { get; set; }
-
-    public override string ToString()
+    public async Task<List<object>> ExecuteReaderAsync(string sql)
     {
-        return $"Id: {Id}, Name: {Name}, Age: {Age}";
+        List<object> result = [];
+        await OpenAsync();
+        using var command = new SqliteCommand(sql, _dbConnection);
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            var obj = new Dictionary<string, object>();
+            for (int i = 0; i < reader.FieldCount; i++)
+            {
+                string strKey = reader.GetName(i);
+                if (reader.GetFieldType(strKey) == typeof(DateTime))
+                {
+                    obj[strKey] = reader.IsDBNull(strKey) ? "" : reader.GetDateTime(i).ToString("yyyy-MM-dd HH:mm:ss");
+                }
+                else
+                {
+                    obj[strKey] = reader.IsDBNull(strKey) ? "" : reader[i];
+                }
+            }
+            result.Add(obj);
+        }
+        return result;
     }
+
+    public async Task<int> ExecuteNonQueryAsync(string sql)
+    {
+        int result;
+        await OpenAsync();
+        using var command = new SqliteCommand(sql, _dbConnection);
+        result = await command.ExecuteNonQueryAsync();
+        await CloseAsync();
+        return result;
+    }
+
+    public async Task<object?> ExecuteScalarAsync(string sql)
+    {
+        object? result;
+        await OpenAsync();
+        using var command = new SqliteCommand(sql, _dbConnection);
+        result = await command.ExecuteScalarAsync();
+        await CloseAsync();
+        return result;
+    }
+
+    public async Task OpenAsync()
+    {
+        if (_dbConnection != null && _dbConnection.State != ConnectionState.Open)
+        {
+            await _dbConnection.OpenAsync();
+        }
+    }
+
+    public async Task CloseAsync()
+    {
+        if (_dbConnection != null && _dbConnection.State != ConnectionState.Closed)
+        {
+            await _dbConnection.CloseAsync();
+        }
+    }
+    public void Dispose()
+    {
+        _dbConnection?.Dispose();
+        GC.SuppressFinalize(this);
+    }
+
 }
