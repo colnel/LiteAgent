@@ -9,9 +9,9 @@ public class DataSetting()
 
 }
 
-public class DomainSettings()
+public class LlmSetting()
 {
-    public int RegisterInterval { get; set; } = 60;
-    public int AliveInterval { get; set; } = 30;
-    public int AliveLostCount { get; set; } = 3;
+    public string ApiKey { get; set; } = "";
+    public string BaseUrl { get; set; } = "";
+    public int TimeoutSeconds { get; set; } = 120;
 }

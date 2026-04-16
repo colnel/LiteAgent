@@ -1,4 +1,8 @@
-﻿using System;
+﻿using LiteAgent.AgentHost.Models;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
+using Microsoft.Extensions.Options;
+using System;
+using System.Buffers.Text;
 using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
@@ -7,6 +11,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace LiteAgent.AgentHost.Services;
 
@@ -66,37 +71,35 @@ public class ChatCompletionRequest
     // 可根据需要添加更多参数
 }
 
-public class LlmService
-{
-}
 
 /// <summary>
 /// DeepSeek 大模型 API 调用客户端
 /// </summary>
-public class LlmClient : IDisposable
+public class LlmClient(IOptions<LlmSetting> _setting, ILogger<LlmClient> _logger) : IDisposable
 {
-    private readonly HttpClient _httpClient;
-    private readonly string _apiKey;
-    private readonly string _baseUrl;
+    private readonly HttpClient _httpClient = new();
+    private readonly string _baseUrl = _setting.Value.BaseUrl.TrimEnd('/');
+
+    private readonly JsonSerializerOptions _jsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     /// <summary>
-    /// 构造 LlmClient 实例
+    /// Performs initialization logic for the current instance.
     /// </summary>
-    /// <param name="apiKey">DeepSeek API Key</param>
-    /// <param name="baseUrl">API 基础地址，默认 https://api.deepseek.com/v1</param>
-    /// <param name="timeoutSeconds">请求超时时间（秒），默认 120 秒</param>
-    public LlmClient(string apiKey, string baseUrl = "https://api.deepseek.com/v1", int timeoutSeconds = 120)
+    internal void Initialize()
     {
-        if (string.IsNullOrWhiteSpace(apiKey))
-            throw new ArgumentException("API Key 不能为空", nameof(apiKey));
-
-        _apiKey = apiKey;
-        _baseUrl = baseUrl.TrimEnd('/');
-
-        _httpClient = new HttpClient();
-        _httpClient.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
-        _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
-        _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        try
+        {
+#pragma warning disable CA1873 // 避免进行可能成本高昂的日志记录
+            _logger.LogInformation("{Service} 初始化中...", nameof(LlmClient));
+#pragma warning restore CA1873 // 避免进行可能成本高昂的日志记录
+            _httpClient.Timeout = TimeSpan.FromSeconds(_setting.Value.TimeoutSeconds);
+            _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _setting.Value.ApiKey);
+            _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "{Service} 初始化失败: {Message}", nameof(LlmClient), ex.Message);
+        }
     }
 
     /// <summary>
@@ -187,7 +190,7 @@ public class LlmClient : IDisposable
             Stream = true
         };
 
-        var json = JsonSerializer.Serialize(request, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        var json = JsonSerializer.Serialize(request, _jsonOptions);
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/chat/completions")
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json")
@@ -199,9 +202,10 @@ public class LlmClient : IDisposable
         var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var reader = new StreamReader(stream);
 
-        while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
+        while (!cancellationToken.IsCancellationRequested)
         {
-            var line = await reader.ReadLineAsync();
+            var line = await reader.ReadLineAsync(cancellationToken);
+            if (line == null) break; // 流结束
             if (string.IsNullOrEmpty(line)) continue;
             if (line.StartsWith("data: "))
             {
@@ -259,7 +263,7 @@ public class LlmClient : IDisposable
             Stream = true
         };
 
-        var json = JsonSerializer.Serialize(request, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        var json = JsonSerializer.Serialize(request, _jsonOptions);
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/chat/completions")
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json")
@@ -271,9 +275,10 @@ public class LlmClient : IDisposable
         var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var reader = new StreamReader(stream);
 
-        while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
+        while (!cancellationToken.IsCancellationRequested)
         {
-            var line = await reader.ReadLineAsync();
+            var line = await reader.ReadLineAsync(cancellationToken);
+            if (line == null) break; // 流结束
             if (string.IsNullOrEmpty(line)) continue;
             if (line.StartsWith("data: "))
             {
@@ -290,7 +295,7 @@ public class LlmClient : IDisposable
                         var delta = choices[0].GetProperty("delta");
                         if (delta.TryGetProperty("content", out var contentProp))
                         {
-                             deltaContent = contentProp.GetString();
+                            deltaContent = contentProp.GetString();
                         }
                     }
                 }
@@ -306,7 +311,7 @@ public class LlmClient : IDisposable
 
     private async Task<ChatCompletionResponse> SendRequestAsync(ChatCompletionRequest request, CancellationToken cancellationToken)
     {
-        var json = JsonSerializer.Serialize(request, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        var json = JsonSerializer.Serialize(request, _jsonOptions);
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/chat/completions")
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json")
@@ -320,8 +325,7 @@ public class LlmClient : IDisposable
             throw new HttpRequestException($"API 请求失败 ({response.StatusCode}): {responseJson}");
         }
 
-        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-        var result = JsonSerializer.Deserialize<ChatCompletionResponse>(responseJson, options);
+        var result = JsonSerializer.Deserialize<ChatCompletionResponse>(responseJson, _jsonOptions);
         if (result == null)
             throw new InvalidOperationException("无法解析 API 响应");
 
@@ -333,6 +337,8 @@ public class LlmClient : IDisposable
     /// </summary>
     public void Dispose()
     {
-        _httpClient?.Dispose();
+        _httpClient.Dispose();
+        GC.SuppressFinalize(this);
     }
+
 }
