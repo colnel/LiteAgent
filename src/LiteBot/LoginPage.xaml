@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:toolkit="http://schemas.microsoft.com/dotnet/2022/maui/toolkit"
+             x:Class="LiteBot.LoginPage"
+             Title="登录" 
+             BackgroundColor="White">
+    <ScrollView>
+        <VerticalStackLayout Spacing="20" Padding="30,60,30,30" 
+                             VerticalOptions="Center" HorizontalOptions="Center"
+                             MaximumWidthRequest="360">
+
+            <!-- 头像区域 -->
+            <Border StrokeShape="RoundRectangle 40" 
+                    HeightRequest="80" WidthRequest="80"
+                    HorizontalOptions="Center"
+                    BackgroundColor="#F2F2F2"
+                    Stroke="#E0E0E0">
+                <Image Source="qq_logo.png" 
+                       HeightRequest="50" WidthRequest="50"
+                       HorizontalOptions="Center" VerticalOptions="Center"
+                       Aspect="AspectFit" />
+            </Border>
+
+            <!-- 标题 -->
+            <Label Text="QQ 登录" 
+                   FontSize="24" 
+                   FontAttributes="Bold"
+                   TextColor="#333333"
+                   HorizontalOptions="Center" />
+
+            <!-- 用户名输入框 -->
+            <Border Stroke="#E0E0E0" 
+                    StrokeShape="RoundRectangle 8" 
+                    Padding="10,5"
+                    BackgroundColor="#FAFAFA">
+                <Grid ColumnDefinitions="Auto,*">
+                    <Label Text="👤" FontSize="18" VerticalOptions="Center" Margin="5,0,10,0" />
+                    <Entry x:Name="UsernameEntry" 
+                           Grid.Column="1"
+                           Text="admin"
+                           Placeholder="QQ号/手机号/邮箱"
+                           PlaceholderColor="#BBBBBB"
+                           TextColor="#333333"
+                           FontSize="15"
+                           BackgroundColor="Transparent" 
+                           Keyboard="Text" />
+                </Grid>
+            </Border>
+
+            <!-- 密码输入框 -->
+            <Border Stroke="#E0E0E0" 
+                    StrokeShape="RoundRectangle 8" 
+                    Padding="10,5"
+                    BackgroundColor="#FAFAFA">
+                <Grid ColumnDefinitions="Auto,*">
+                    <Label Text="🔒" FontSize="18" VerticalOptions="Center" Margin="5,0,10,0" />
+                    <Entry x:Name="PasswordEntry" 
+                           Grid.Column="1"
+                               Text="123456"
+                           Placeholder="密码"
+                           PlaceholderColor="#BBBBBB"
+                           TextColor="#333333"
+                           FontSize="15"
+                           IsPassword="True"
+                           BackgroundColor="Transparent" />
+                </Grid>
+            </Border>
+
+            <!-- 验证码区域 -->
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                <!-- 验证码输入 -->
+                <Border Stroke="#E0E0E0" 
+                        StrokeShape="RoundRectangle 8" 
+                        Padding="10,5"
+                        BackgroundColor="#FAFAFA">
+                    <Grid ColumnDefinitions="Auto,*">
+                        <Label Text="🛡️" FontSize="18" VerticalOptions="Center" Margin="5,0,10,0" />
+                        <Entry x:Name="CaptchaEntry" 
+                               Grid.Column="1"
+                               Text="1111"
+                               Placeholder="验证码"
+                               PlaceholderColor="#BBBBBB"
+                               TextColor="#333333"
+                               FontSize="15"
+                               BackgroundColor="Transparent" 
+                               Keyboard="Plain" />
+                    </Grid>
+                </Border>
+
+                <!-- 验证码显示（图形化效果） -->
+                <Border Grid.Column="1"
+                        Stroke="#D0D0D0"
+                        StrokeShape="RoundRectangle 6"
+                        HeightRequest="45"
+                        WidthRequest="100"
+                        BackgroundColor="#F8F8F8"
+                        HorizontalOptions="End">
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Tapped="OnCaptchaTapped" />
+                    </Border.GestureRecognizers>
+                    <Grid>
+                        <!-- 干扰线 -->
+                        <BoxView Color="Transparent" />
+                        <Label x:Name="CaptchaLabel" 
+                               Text="Ab3X" 
+                               FontSize="22" 
+                               FontAttributes="Italic"
+                               TextColor="#336699"
+                               HorizontalOptions="Center" 
+                               VerticalOptions="Center"
+                               Rotation="-5">
+                        </Label>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- 登录按钮 -->
+            <Button Text="登 录" 
+                    FontSize="16"
+                    BackgroundColor="#12B7F5"
+                    TextColor="White"
+                    CornerRadius="8"
+                    HeightRequest="45"
+                    Clicked="OnLoginClicked" />
+
+            <!-- 底部链接 -->
+            <HorizontalStackLayout HorizontalOptions="Center" Spacing="15">
+                <Label Text="注册账号" TextColor="#12B7F5" FontSize="14">
+                    <Label.GestureRecognizers>
+                        <TapGestureRecognizer Tapped="OnRegisterTapped" />
+                    </Label.GestureRecognizers>
+                </Label>
+                <Label Text="|" TextColor="#CCCCCC" FontSize="14" />
+                <Label Text="找回密码" TextColor="#12B7F5" FontSize="14">
+                    <Label.GestureRecognizers>
+                        <TapGestureRecognizer Tapped="OnForgotPwdTapped" />
+                    </Label.GestureRecognizers>
+                </Label>
+            </HorizontalStackLayout>
+
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

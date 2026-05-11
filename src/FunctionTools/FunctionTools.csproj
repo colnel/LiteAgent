@@ -6,4 +6,14 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="ClickHouse.Client" Version="7.14.0" />
+    <PackageReference Include="DM.DmProvider" Version="8.3.1.47463" />
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
+    <PackageReference Include="Kdbndp_V9" Version="8.0.3.424" />
+    <PackageReference Include="MySqlConnector" Version="2.5.0" />
+    <PackageReference Include="Npgsql" Version="10.0.2" />
+    <PackageReference Include="Oracle.ManagedDataAccess.Core" Version="23.26.200" />
+  </ItemGroup>
+
 </Project>

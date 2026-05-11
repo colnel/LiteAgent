@@ -10,175 +10,126 @@ namespace LiteAgent.AgentHost.Services;
 /// <summary>
 /// SQLite 数据服务类，提供 AgentSkill 表的增删改查操作
 /// </summary>
-public class DataService(IOptions<string> _connString, ILogger<Worker> _logger) : IDisposable
+public class DataService(IOptions<DataSetting> _setting, ILogger<DataService> _logger) : IDisposable
 {
     private readonly SqliteConnection _dbConnection = new(new SqliteConnectionStringBuilder
     {
-        DataSource = _connString.Value,
+        DataSource = _setting.Value.ConnectionString,
         Mode = SqliteOpenMode.ReadWriteCreate, // 不存在则创建
         Cache = SqliteCacheMode.Shared,
         DefaultTimeout = 5000, // 设置默认超时时间为5秒
         Password = "colnel*LiteAgent@2026" // 可选：设置数据库密码
     }.ToString());
 
+
     /// <summary>
     /// 初始化数据库连接和表结构
     /// </summary>
-    internal async Task Initialize()
+    internal  async Task Initialize()
     {
         try
         {
-            await OpenAsync();
-            await ExecuteNonQueryAsync(@"
-                CREATE TABLE IF NOT EXISTS Skill (
+          await   ExecuteNonQueryAsync(@"
+                CREATE TABLE IF NOT EXISTS agent_skills (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     Name TEXT NOT NULL,
-                    Age INTEGER NOT NULL
+                    Description TEXT,
+                    License TEXT,
+                    Compatibility TEXT,
+                    Metadata TEXT,
+                    AllowedTools TEXT,
+                    Body TEXT,
+                    IsActive INTEGER NOT NULL DEFAULT 1,
+                    CreatedTime TEXT NOT NULL,
+                    UpdatedTime TEXT
                 )");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "DataService 初始化失败:{ex}", ex);
         }
-
     }
 
     /// <summary>
-    /// 插入一条新用户记录
+    /// 添加一条新的 AgentSkill 记录，并返回新记录的条数，失败返回 -1
     /// </summary>
-    /// <param name="name">姓名</param>
-    /// <param name="age">年龄</param>
-    /// <returns>新记录的自增 Id，失败返回 -1</returns>
-    public int InsertUser(string name, int age)
+    /// <param name="skill"></param>
+    /// <returns></returns>
+    public async Task<int> AddSkill(AgentSkill skill)
     {
         const string insertSql = @"
-                INSERT INTO AgentSkill (Name, Age)
-                VALUES (@name, @age);
+                INSERT INTO agent_skills (Name, Description, License, Compatibility, Metadata, AllowedTools, Body, IsActive, CreatedTime, UpdatedTime)
+                VALUES (@name, @description, @license, @compatibility, @metadata, @allowedTools, @body, @isActive, @createdTime, @updatedTime);
                 SELECT last_insert_rowid();";
-
-        using var connection = new SqliteConnection(_connectionString);
-        connection.Open();
-        using var command = new SqliteCommand(insertSql, connection);
-        command.Parameters.AddWithValue("@name", name);
-        command.Parameters.AddWithValue("@age", age);
-
-        var result = command.ExecuteScalar();
+        using var command = new SqliteCommand(insertSql, _dbConnection);
+        command.Parameters.AddWithValue("@name", skill.Name);
+        command.Parameters.AddWithValue("@description", skill.Description);
+        command.Parameters.AddWithValue("@license", skill.License ?? string.Empty);
+        command.Parameters.AddWithValue("@compatibility", skill.Compatibility ?? string.Empty);
+        command.Parameters.AddWithValue("@metadata", skill.Metadata ?? string.Empty);
+        command.Parameters.AddWithValue("@allowedTools", skill.AllowedTools.ToString() ?? string.Empty);
+        command.Parameters.AddWithValue("@body", skill.Body ?? string.Empty);
+        command.Parameters.AddWithValue("@isActive", skill.IsActive ? 1 : 0);
+        command.Parameters.AddWithValue("@createdTime", skill.CreatedTime.ToString("yyyy-MM-dd HH:mm:ss"));
+        command.Parameters.AddWithValue("@updatedTime", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+        var result = await command.ExecuteScalarAsync();
         return result != null ? Convert.ToInt32(result) : -1;
     }
 
-    /// <summary>
-    /// 根据 Id 更新用户信息
-    /// </summary>
-    /// <returns>受影响的行数</returns>
-    public int UpdateUser(int id, string newName, int newAge)
+    public async Task<int> UpdateSkill(AgentSkill skill)
     {
         const string updateSql = @"
-                UPDATE AgentSkill
-                SET Name = @name, Age = @age
+                UPDATE agent_skills
+                SET Name = @name, Description = @description, License = @license, Compatibility = @compatibility, Metadata = @metadata, AllowedTools = @allowedTools, Body = @body, IsActive = @isActive, UpdatedTime = @updatedTime
                 WHERE Id = @id";
-
-        using var connection = new SqliteConnection(_connectionString);
-        connection.Open();
-        using var command = new SqliteCommand(updateSql, connection);
-        command.Parameters.AddWithValue("@id", id);
-        command.Parameters.AddWithValue("@name", newName);
-        command.Parameters.AddWithValue("@age", newAge);
-
-        return command.ExecuteNonQuery();
+        using var command = new SqliteCommand(updateSql, _dbConnection);
+        command.Parameters.AddWithValue("@id", skill.Id);
+        command.Parameters.AddWithValue("@name", skill.Name);
+        command.Parameters.AddWithValue("@description", skill.Description);
+        command.Parameters.AddWithValue("@license", skill.License ?? string.Empty);
+        command.Parameters.AddWithValue("@compatibility", skill.Compatibility ?? string.Empty);
+        command.Parameters.AddWithValue("@metadata", skill.Metadata ?? string.Empty);
+        command.Parameters.AddWithValue("@allowedTools", skill.AllowedTools.ToString() ?? string.Empty);
+        command.Parameters.AddWithValue("@body", skill.Body ?? string.Empty);
+        command.Parameters.AddWithValue("@isActive", skill.IsActive ? 1 : 0);
+        command.Parameters.AddWithValue("@updatedTime", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+        return await command.ExecuteNonQueryAsync();
     }
 
-    /// <summary>
-    /// 根据 Id 删除用户
-    /// </summary>
-    /// <returns>受影响的行数</returns>
-    public int DeleteUser(int id)
+    public async Task<int> DeleteSkill(int id)
     {
-        const string deleteSql = "DELETE FROM AgentSkill WHERE Id = @id";
-
-        using var connection = new SqliteConnection(_connectionString);
-        connection.Open();
-        using var command = new SqliteCommand(deleteSql, connection);
+        const string deleteSql = "DELETE FROM agent_skills WHERE Id = @id";
+        using var command = new SqliteCommand(deleteSql, _dbConnection);
         command.Parameters.AddWithValue("@id", id);
-
-        return command.ExecuteNonQuery();
+        return await command.ExecuteNonQueryAsync();
     }
-
-    /// <summary>
-    /// 根据 Id 查询单个用户
-    /// </summary>
-    /// <returns>AgentSkill 对象，未找到返回 null</returns>
-    public AgentSkill GetUserById(int id)
+    public async Task<AgentSkill?> GetSkillById(int id)
     {
-        const string querySql = "SELECT Id, Name, Age FROM AgentSkill WHERE Id = @id";
-
-        using var connection = new SqliteConnection(_connectionString);
-        connection.Open();
-        using var command = new SqliteCommand(querySql, connection);
+        const string selectSql = "SELECT * FROM agent_skills WHERE Id = @id";
+        using var command = new SqliteCommand(selectSql, _dbConnection);
         command.Parameters.AddWithValue("@id", id);
-
-        using var reader = command.ExecuteReader();
+        using var reader = await command.ExecuteReaderAsync();
         if (reader.Read())
         {
             return new AgentSkill
             {
-                Id = reader.GetInt32(0),
-                Name = reader.GetString(1),
-                Age = reader.GetInt32(2)
+                Id = reader.GetInt32(reader.GetOrdinal("Id")),
+                Name = reader.GetString(reader.GetOrdinal("Name")),
+                Description = reader.GetString(reader.GetOrdinal("Description")),
+                License = reader.GetString(reader.GetOrdinal("License")),
+                Compatibility = reader.GetString(reader.GetOrdinal("Compatibility")),
+                Metadata = reader.GetString(reader.GetOrdinal("Metadata")),
+                AllowedTools = reader.GetString(reader.GetOrdinal("AllowedTools")).Split(','),
+                Body = reader.GetString(reader.GetOrdinal("Body")),
+                IsActive = reader.GetInt32(reader.GetOrdinal("IsActive")) == 1,
+                CreatedTime = DateTime.Parse(reader.GetString(reader.GetOrdinal("CreatedTime"))),
+                UpdatedTime = DateTime.Parse(reader.GetString(reader.GetOrdinal("UpdatedTime")))
             };
         }
         return null;
     }
 
-    /// <summary>
-    /// 获取所有用户列表
-    /// </summary>
-    public List<AgentSkill> GetAllUsers()
-    {
-        const string querySql = "SELECT Id, Name, Age FROM AgentSkill ORDER BY Id";
 
-        var users = new List<AgentSkill>();
-        using var connection = new SqliteConnection(_connectionString);
-        connection.Open();
-        using var command = new SqliteCommand(querySql, connection);
-        using var reader = command.ExecuteReader();
-
-        while (reader.Read())
-        {
-            users.Add(new AgentSkill
-            {
-                Id = reader.GetInt32(0),
-                Name = reader.GetString(1),
-                Age = reader.GetInt32(2)
-            });
-        }
-        return users;
-    }
-
-    /// <summary>
-    /// 按姓名模糊查询用户
-    /// </summary>
-    public List<AgentSkill> SearchUsersByName(string keyword)
-    {
-        const string searchSql = "SELECT Id, Name, Age FROM AgentSkill WHERE Name LIKE @keyword ORDER BY Id";
-        var users = new List<AgentSkill>();
-
-        using var connection = new SqliteConnection(_connectionString);
-        connection.Open();
-        using var command = new SqliteCommand(searchSql, connection);
-        command.Parameters.AddWithValue("@keyword", $"%{keyword}%");
-
-        using var reader = command.ExecuteReader();
-        while (reader.Read())
-        {
-            users.Add(new AgentSkill
-            {
-                Id = reader.GetInt32(0),
-                Name = reader.GetString(1),
-                Age = reader.GetInt32(2)
-            });
-        }
-        return users;
-    }
     public async Task<List<object>> ExecuteReaderAsync(string sql)
     {
         List<object> result = [];

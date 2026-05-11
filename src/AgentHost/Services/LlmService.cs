@@ -1,76 +1,10 @@
 ﻿using LiteAgent.AgentHost.Models;
-using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.Extensions.Options;
-using System;
-using System.Buffers.Text;
-using System.Collections.Generic;
-using System.IO;
-using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
-using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace LiteAgent.AgentHost.Services;
-
-/// <summary>
-/// 表示一个对话消息（角色 + 内容）
-/// </summary>
-public class ChatMessage
-{
-    public string Role { get; set; } = string.Empty;   // "system", "user", "assistant"
-    public string Content { get; set; } = string.Empty;
-}
-
-/// <summary>
-/// 非流式响应中的选择项
-/// </summary>
-public class Choice
-{
-    public int Index { get; set; }
-    public ChatMessage Message { get; set; } = new();
-    public string? FinishReason { get; set; }
-}
-
-/// <summary>
-/// 用量统计
-/// </summary>
-public class Usage
-{
-    public int PromptTokens { get; set; }
-    public int CompletionTokens { get; set; }
-    public int TotalTokens { get; set; }
-}
-
-/// <summary>
-/// DeepSeek API 非流式响应的整体结构
-/// </summary>
-public class ChatCompletionResponse
-{
-    public string Id { get; set; } = string.Empty;
-    public string Object { get; set; } = string.Empty;
-    public long Created { get; set; }
-    public string Model { get; set; } = string.Empty;
-    public List<Choice> Choices { get; set; } = new();
-    public Usage? Usage { get; set; }
-}
-
-/// <summary>
-/// DeepSeek API 请求参数
-/// </summary>
-public class ChatCompletionRequest
-{
-    public string Model { get; set; } = "deepseek-chat";
-    public List<ChatMessage> Messages { get; set; } = new();
-    public double? Temperature { get; set; }
-    public int? MaxTokens { get; set; }
-    public double? TopP { get; set; }
-    public bool? Stream { get; set; }
-    // 可根据需要添加更多参数
-}
-
 
 /// <summary>
 /// DeepSeek 大模型 API 调用客户端
@@ -79,8 +13,15 @@ public class LlmClient(IOptions<LlmSetting> _setting, ILogger<LlmClient> _logger
 {
     private readonly HttpClient _httpClient = new();
     private readonly string _baseUrl = _setting.Value.BaseUrl.TrimEnd('/');
+    private readonly string _chatModel = _setting.Value.ChatModel;
+    private readonly string _reasoningModel = _setting.Value.ReasoningModel;
 
-    private readonly JsonSerializerOptions _jsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    private readonly JsonSerializerOptions _jsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+    };
+
 
     /// <summary>
     /// Performs initialization logic for the current instance.
@@ -89,105 +30,33 @@ public class LlmClient(IOptions<LlmSetting> _setting, ILogger<LlmClient> _logger
     {
         try
         {
-#pragma warning disable CA1873 // 避免进行可能成本高昂的日志记录
-            _logger.LogInformation("{Service} 初始化中...", nameof(LlmClient));
-#pragma warning restore CA1873 // 避免进行可能成本高昂的日志记录
             _httpClient.Timeout = TimeSpan.FromSeconds(_setting.Value.TimeoutSeconds);
             _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _setting.Value.ApiKey);
             _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "{Service} 初始化失败: {Message}", nameof(LlmClient), ex.Message);
+            _logger.LogError(ex, "{Service} 初始化失败: {ChatMessage}", nameof(LlmClient), ex.Message);
         }
     }
 
     /// <summary>
-    /// 发送聊天消息（非流式），返回完整响应对象
+    /// 非流式对话，返回完整的回复文本
     /// </summary>
-    /// <param name="messages">对话消息列表</param>
-    /// <param name="model">模型名称，默认 deepseek-chat</param>
-    /// <param name="temperature">温度参数 (0~2)</param>
-    /// <param name="maxTokens">最大输出 token 数</param>
-    /// <param name="topP">核采样参数</param>
+    /// <param name="messages">对话历史</param>
     /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>API 返回的响应对象</returns>
-    public async Task<ChatCompletionResponse> SendMessageAsync(
-        List<ChatMessage> messages,
-        string model = "deepseek-chat",
-        double? temperature = null,
-        int? maxTokens = null,
-        double? topP = null,
-        CancellationToken cancellationToken = default)
+    /// <returns>模型生成的完整回答</returns>
+    public async Task<string> ChatAsync(List<RequestMessage> messages, CancellationToken cancellationToken = default)
     {
-        var request = new ChatCompletionRequest
+        var request = new ChatRequest
         {
-            Model = model,
             Messages = messages,
-            Temperature = temperature,
-            MaxTokens = maxTokens,
-            TopP = topP,
-            Stream = false
-        };
-
-        return await SendRequestAsync(request, cancellationToken);
-    }
-
-    /// <summary>
-    /// 发送聊天消息（非流式），使用简单的 system 和 user 消息
-    /// </summary>
-    /// <param name="systemPrompt">系统提示（可选）</param>
-    /// <param name="userMessage">用户消息</param>
-    /// <param name="model">模型名称</param>
-    /// <param name="temperature">温度参数</param>
-    /// <param name="maxTokens">最大输出 token 数</param>
-    /// <param name="topP">核采样参数</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>API 返回的响应对象</returns>
-    public async Task<ChatCompletionResponse> SendMessageAsync(
-        string? systemPrompt,
-        string userMessage,
-        string model = "deepseek-chat",
-        double? temperature = null,
-        int? maxTokens = null,
-        double? topP = null,
-        CancellationToken cancellationToken = default)
-    {
-        var messages = new List<ChatMessage>();
-        if (!string.IsNullOrWhiteSpace(systemPrompt))
-            messages.Add(new ChatMessage { Role = "system", Content = systemPrompt });
-        messages.Add(new ChatMessage { Role = "user", Content = userMessage });
-
-        return await SendMessageAsync(messages, model, temperature, maxTokens, topP, cancellationToken);
-    }
-
-    /// <summary>
-    /// 发送流式请求，逐块返回增量内容
-    /// </summary>
-    /// <param name="messages">对话消息列表</param>
-    /// <param name="onDelta">每个数据块的回调，参数为增量文本</param>
-    /// <param name="model">模型名称</param>
-    /// <param name="temperature">温度参数</param>
-    /// <param name="maxTokens">最大输出 token 数</param>
-    /// <param name="topP">核采样参数</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    public async Task SendMessageStreamAsync(
-        List<ChatMessage> messages,
-        Action<string> onDelta,
-        string model = "deepseek-chat",
-        double? temperature = null,
-        int? maxTokens = null,
-        double? topP = null,
-        CancellationToken cancellationToken = default)
-    {
-        var request = new ChatCompletionRequest
-        {
-            Model = model,
-            Messages = messages,
-            Temperature = temperature,
-            MaxTokens = maxTokens,
-            TopP = topP,
-            Stream = true
+            Stream = false,
+            Model = _chatModel,
+            Thinking = new
+            {
+                type = "disable"
+            }
         };
 
         var json = JsonSerializer.Serialize(request, _jsonOptions);
@@ -196,140 +65,181 @@ public class LlmClient(IOptions<LlmSetting> _setting, ILogger<LlmClient> _logger
             Content = new StringContent(json, Encoding.UTF8, "application/json")
         };
 
-        using var response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
         response.EnsureSuccessStatusCode();
 
-        var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var reader = new StreamReader(stream);
-
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            var line = await reader.ReadLineAsync(cancellationToken);
-            if (line == null) break; // 流结束
-            if (string.IsNullOrEmpty(line)) continue;
-            if (line.StartsWith("data: "))
-            {
-                var data = line.Substring(6);
-                if (data == "[DONE]") break;
-
-                try
-                {
-                    using var doc = JsonDocument.Parse(data);
-                    var root = doc.RootElement;
-                    if (root.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0)
-                    {
-                        var delta = choices[0].GetProperty("delta");
-                        if (delta.TryGetProperty("content", out var contentProp))
-                        {
-                            var deltaContent = contentProp.GetString();
-                            if (!string.IsNullOrEmpty(deltaContent))
-                                onDelta(deltaContent);
-                        }
-                    }
-                }
-                catch (JsonException)
-                {
-                    // 忽略解析错误，继续处理下一块
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// 发送流式请求，使用 IAsyncEnumerable 返回增量块
-    /// </summary>
-    /// <param name="messages">对话消息列表</param>
-    /// <param name="model">模型名称</param>
-    /// <param name="temperature">温度参数</param>
-    /// <param name="maxTokens">最大输出 token 数</param>
-    /// <param name="topP">核采样参数</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>异步枚举增量文本</returns>
-    public async IAsyncEnumerable<string> SendMessageStreamAsync(
-        List<ChatMessage> messages,
-        string model = "deepseek-chat",
-        double? temperature = null,
-        int? maxTokens = null,
-        double? topP = null,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        var request = new ChatCompletionRequest
-        {
-            Model = model,
-            Messages = messages,
-            Temperature = temperature,
-            MaxTokens = maxTokens,
-            TopP = topP,
-            Stream = true
-        };
-
-        var json = JsonSerializer.Serialize(request, _jsonOptions);
-        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/chat/completions")
-        {
-            Content = new StringContent(json, Encoding.UTF8, "application/json")
-        };
-
-        using var response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var reader = new StreamReader(stream);
-
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            var line = await reader.ReadLineAsync(cancellationToken);
-            if (line == null) break; // 流结束
-            if (string.IsNullOrEmpty(line)) continue;
-            if (line.StartsWith("data: "))
-            {
-                var data = line.Substring(6);
-                if (data == "[DONE]") break;
-
-                string? deltaContent = null;
-                try
-                {
-                    using var doc = JsonDocument.Parse(data);
-                    var root = doc.RootElement;
-                    if (root.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0)
-                    {
-                        var delta = choices[0].GetProperty("delta");
-                        if (delta.TryGetProperty("content", out var contentProp))
-                        {
-                            deltaContent = contentProp.GetString();
-                        }
-                    }
-                }
-                catch (JsonException)
-                {
-                    // 忽略解析错误
-                }
-                if (!string.IsNullOrEmpty(deltaContent))
-                    yield return deltaContent;
-            }
-        }
-    }
-
-    private async Task<ChatCompletionResponse> SendRequestAsync(ChatCompletionRequest request, CancellationToken cancellationToken)
-    {
-        var json = JsonSerializer.Serialize(request, _jsonOptions);
-        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/chat/completions")
-        {
-            Content = new StringContent(json, Encoding.UTF8, "application/json")
-        };
-
-        using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
         var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
+        var chatResponse = JsonSerializer.Deserialize<ChatResponse>(responseJson, _jsonOptions);
 
-        if (!response.IsSuccessStatusCode)
+        return chatResponse?.Choices?.FirstOrDefault()?.Message?.Content ?? string.Empty;
+    }
+    /// <summary>
+    /// 流式对话，实时输出每个 token
+    /// </summary>
+    /// <param name="messages">对话历史</param>
+    /// <param name="onToken">接收到文本 token 时的回调</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    public async Task ChatStreamAsync(List<RequestMessage> messages, Action<string> onToken, CancellationToken cancellationToken = default)
+    {
+        var request = new ChatRequest
         {
-            throw new HttpRequestException($"API 请求失败 ({response.StatusCode}): {responseJson}");
+            Messages = messages,
+            Model = _reasoningModel
+        };
+        await StreamChatCompletionsAsync(request, onToken, null, cancellationToken);
+    }
+
+    public async Task<ChatResponse> ToolCallAsync(List<RequestMessage> messages, List<Tool> tools, CancellationToken cancellationToken = default)
+    {
+        var request = new ChatRequest
+        {
+            Messages = messages,
+            Model = _reasoningModel,
+            Tools = tools,
+        };
+        var json = JsonSerializer.Serialize(request, _jsonOptions);
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/chat/completions")
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+        var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
+        var chatResponse = JsonSerializer.Deserialize<ChatResponse>(responseJson, _jsonOptions);
+        return chatResponse ?? new ChatResponse();
+    }
+
+    /// <summary>
+    /// 技能调用（Agent Loop），支持流式输出文本增量，自动处理函数调用循环
+    /// </summary>
+    /// <param name="messages">对话历史</param>
+    /// <param name="tools">可用工具列表</param>
+    /// <param name="functionExecutor">执行函数的委托，参数为 (functionName, argumentsJson)，返回函数的执行结果（字符串）</param>
+    /// <param name="onTextToken">接收到文本 token 时的回调（流式）</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    public async Task ToolUseAsync(
+        List<RequestMessage> messages,
+        List<Tool> tools,
+        Func<string, string, Task<string>> functionExecutor,
+        Action<string> onTextToken,
+        CancellationToken cancellationToken = default)
+    {
+        // 深拷贝消息列表，避免修改外部数据
+        var currentMessages = new List<RequestMessage>(messages);
+        while (true)
+        {
+            var request = new ChatRequest
+            {
+                Messages = currentMessages,
+                Model = _reasoningModel,
+                Tools = tools,
+            };
+
+            // 收集本次请求的最终内容（无工具调用时）或工具调用列表
+            string? assistantContent = null;
+            List<ToolCall>? toolCalls = null;
+
+            await StreamChatCompletionsAsync(request, onTextToken, (builder) =>
+            {
+                // 流结束后从 builder 中提取结果
+                assistantContent = builder.Content;
+                toolCalls = builder.ToolCalls;
+            }, cancellationToken);
+
+            // 如果模型没有请求工具调用，则结束循环
+            if (toolCalls == null || toolCalls.Count == 0)
+            {
+                if (!string.IsNullOrEmpty(assistantContent))
+                {
+                    // 最终的助手消息已经通过 onTextToken 流式输出过了，无需再次输出
+                }
+                break;
+            }
+
+            // 将本次assistant消息加入历史（即使没有内容也要加，保持状态）
+            currentMessages.Add(new RequestMessage()
+            {
+                Role = Role.Assistant,
+                Content = assistantContent ?? ""
+            });
+
+            // 执行每个工具调用，并将结果作为 Tool 消息返回
+            foreach (var toolCall in toolCalls)
+            {
+                string result = await functionExecutor(toolCall.Function.Name, toolCall.Function.Arguments);
+                currentMessages.Add(new RequestMessage()
+                {
+                    Role = Role.Tool,
+                    ToolCallId = toolCall.Id,
+                    Content = result
+                });
+            }
+        }
+    }
+
+    /// <summary>
+    /// 核心流式请求处理，支持工具调用增量收集和文本实时输出
+    /// </summary>
+    private async Task StreamChatCompletionsAsync(ChatRequest request, Action<string> onTextToken, Action<StreamingResponseBuilder>? onComplete, CancellationToken cancellationToken)
+    {
+        request.Stream = true;
+        var jsonRequest = JsonSerializer.Serialize(request, _jsonOptions);
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/chat/completions")
+        {
+            Content = new StringContent(jsonRequest, Encoding.UTF8, "application/json")
+        };
+        httpRequest.Headers.Add("Accept", "text/event-stream");
+
+        var response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var reader = new StreamReader(stream);
+
+        var builder = new StreamingResponseBuilder();
+        string? line;
+        while ((line = await reader.ReadLineAsync(cancellationToken)) != null)
+        {
+            if (string.IsNullOrEmpty(line) || !line.StartsWith("data: "))
+                continue;
+
+            var data = line.Substring(6);
+            if (data == "[DONE]")
+                break;
+
+            try
+            {
+                var chunk = JsonSerializer.Deserialize<StreamChunk>(data, _jsonOptions);
+                if (chunk?.Choices == null || chunk.Choices.Count == 0)
+                    continue;
+
+                var delta = chunk.Choices[0].Delta;
+                if (delta == null)
+                    continue;
+
+                // 处理文本 token
+                if (!string.IsNullOrEmpty(delta.Content))
+                {
+                    onTextToken(delta.Content);
+                    builder.AppendContent(delta.Content);
+                }
+
+                // 处理工具调用增量
+                if (delta.ToolCalls != null)
+                {
+                    foreach (var toolDelta in delta.ToolCalls)
+                    {
+                        builder.AppendToolCallDelta(toolDelta);
+                    }
+                }
+            }
+            catch (JsonException)
+            {
+                // 忽略解析错误，继续处理
+            }
         }
 
-        var result = JsonSerializer.Deserialize<ChatCompletionResponse>(responseJson, _jsonOptions);
-        if (result == null)
-            throw new InvalidOperationException("无法解析 API 响应");
-
-        return result;
+        onComplete?.Invoke(builder);
     }
 
     /// <summary>
@@ -340,5 +250,4 @@ public class LlmClient(IOptions<LlmSetting> _setting, ILogger<LlmClient> _logger
         _httpClient.Dispose();
         GC.SuppressFinalize(this);
     }
-
 }

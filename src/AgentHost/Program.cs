@@ -1,3 +1,4 @@
+using LiteAgent.AgentHost;
 using LiteAgent.AgentHost.Models;
 using LiteAgent.AgentHost.Services;
 using Microsoft.AspNetCore.Http.Features;
@@ -6,11 +7,12 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.Configure<DataSetting>(builder.Configuration.GetSection("DataSettings"));
+builder.Services.Configure<DataSetting>(builder.Configuration.GetSection("SQLiteSetting"));
 builder.Services.Configure<LlmSetting>(builder.Configuration.GetSection("LlmSetting"));
 
+builder.Services.AddHostedService<Worker>();
 builder.Services.AddScoped<DataService>();
-builder.Services.AddSingleton<LlmClient>();
+builder.Services.AddScoped<LlmClient>();
 
 //builder.Logging.ClearProviders();
 //builder.Logging.AddTxtLogger();
@@ -27,7 +29,7 @@ builder.Services.Configure<KestrelServerOptions>(options => { options.Limits.Max
 builder.Services.Configure<FormOptions>(options => { options.MultipartBodyLengthLimit = 268435456; });
 var app = builder.Build();
 
-app.MapGet("/", () => "            !");
+app.MapGet("/", () => "服务正常运行!");
 //app.UseHttpsRedirection();
 
 

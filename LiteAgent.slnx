@@ -1,4 +1,7 @@
 <Solution>
   <Project Path="src/AgentHost/AgentHost.csproj" Id="9d33363d-d388-4f28-9f7e-f49c0817f4cf" />
   <Project Path="src/FunctionTools/FunctionTools.csproj" Id="a3ed07c9-0ca6-4407-8c9f-50dfb9c618cc" />
+  <Project Path="src/LiteBot/LiteBot.csproj" Id="cc09f8dd-0714-4ccb-800e-53e3c9d96e7f">
+    <Deploy Solution="Debug|*" />
+  </Project>
 </Solution>

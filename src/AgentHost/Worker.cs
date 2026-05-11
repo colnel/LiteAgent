@@ -11,7 +11,6 @@ public sealed class Worker(IServiceProvider serviceProvider, ILogger<Worker> _lo
     private readonly IServiceProvider _serviceProvider = serviceProvider;
     private readonly Task _completedTask = Task.CompletedTask;
 
-    private LlmClient? _llmClient;
     private Timer? _timer;
 
     /// <summary>
@@ -19,17 +18,22 @@ public sealed class Worker(IServiceProvider serviceProvider, ILogger<Worker> _lo
     /// </summary>
     /// <param name="stoppingToken"></param>
     /// <returns></returns>
-    public Task StartAsync(CancellationToken stoppingToken)
+    public   Task StartAsync(CancellationToken stoppingToken)
     {
         try
         {
-            _logger.LogInformation("{Service} 开始启动...", nameof(Worker));
+            _logger.LogInformation("Worker开始启动...");
 
             //注册Nuget包System.Text.Encoding.CodePages中的编码到.NET Core，用于支持GB2312等编码方式
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
-            _llmClient = _serviceProvider.GetService<LlmClient>();
-            _llmClient?.Initialize();
+            using IServiceScope scope = _serviceProvider.CreateScope();
+            IServiceProvider provider = scope.ServiceProvider;
+            DataService db = provider.GetRequiredService<DataService>();
+            _ = db.Initialize();
+
+            LlmClient llmClient=provider.GetRequiredService<LlmClient>();
+            llmClient.Initialize();
 
             _timer = new Timer(DoWork, null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
             // TestAsync();
@@ -56,7 +60,7 @@ public sealed class Worker(IServiceProvider serviceProvider, ILogger<Worker> _lo
     {
         try
         {
-          //  _llmClient?.TickWork();
+            //  _llmClient?.TickWork();
         }
         catch (Exception ex)
         {
